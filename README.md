@@ -237,11 +237,6 @@ API documentation available at: http://localhost:5000/docs (when backend is runn
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
-## 👨‍💻 Author
-
-**Vũ Đăng Khoa**
-- Email: your-email@example.com
-- GitHub: [@your-username](https://github.com/your-username)
 
 ## 🙏 Acknowledgments
 
@@ -255,7 +250,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 ## 📞 Support
 
 Nếu bạn gặp vấn đề hoặc có câu hỏi, vui lòng:
-1. Kiểm tra [Issues](https://github.com/your-username/visecure/issues)
+1. Kiểm tra [Issues](https://github.com/Vudangkhoa0910/viSecure/issues)
 2. Tạo issue mới nếu chưa có
 3. Liên hệ qua email: support@visecure.com
 
