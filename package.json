@@ -1,0 +1,48 @@
+{
+  "name": "visecure",
+  "version": "1.0.0",
+  "description": "ViSecure - Giải pháp bảo mật di động cho người Việt",
+  "main": "index.js",
+  "scripts": {
+    "setup": "./setup.sh",
+    "dev": "./start-dev.sh",
+    "install:frontend": "cd frontend && npm install",
+    "install:backend": "cd backend && npm install",
+    "install:all": "npm run install:frontend && npm run install:backend",
+    "build:frontend": "cd frontend && npm run build",
+    "build:backend": "cd backend && npm run build",
+    "build:all": "npm run build:frontend && npm run build:backend",
+    "start:frontend": "cd frontend && npm run dev",
+    "start:backend": "cd backend && npm run dev",
+    "test:frontend": "cd frontend && npm test",
+    "test:backend": "cd backend && npm test",
+    "test:all": "npm run test:frontend && npm run test:backend",
+    "lint:frontend": "cd frontend && npm run lint",
+    "lint:backend": "cd backend && npm run lint",
+    "lint:all": "npm run lint:frontend && npm run lint:backend"
+  },
+  "keywords": [
+    "security",
+    "mobile",
+    "vault",
+    "scanner",
+    "vpn",
+    "vietnam",
+    "password-manager",
+    "phishing-protection"
+  ],
+  "author": "Vũ Đăng Khoa <your-email@example.com>",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/your-username/visecure.git"
+  },
+  "bugs": {
+    "url": "https://github.com/your-username/visecure/issues"
+  },
+  "homepage": "https://github.com/your-username/visecure#readme",
+  "engines": {
+    "node": ">=18.0.0",
+    "npm": ">=9.0.0"
+  }
+}
