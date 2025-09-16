@@ -1,166 +1,193 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, memo } from 'react'
 import {
-  Container,
-  Typography,
   Box,
+  Typography,
   Card,
   CardContent,
   Button,
+  TextField,
   Dialog,
   DialogTitle,
   DialogContent,
   DialogActions,
-  TextField,
-  Select,
-  MenuItem,
-  FormControl,
-  InputLabel,
   List,
   ListItem,
   ListItemText,
-  ListItemSecondaryAction,
+  IconButton,
   Chip,
   Alert,
+  Fab,
+  Grid,
+  MenuItem,
+  Select,
+  FormControl,
+  InputLabel,
+  Snackbar,
   CircularProgress,
-  InputAdornment
 } from '@mui/material'
-import { useLocalStorage } from '../hooks/useLocalStorage'
+import {
+  Add as AddIcon,
+  Edit as EditIcon,
+  Delete as DeleteIcon,
+  ContentCopy as CopyIcon,
+  GetApp as ExportIcon,
+  Publish as ImportIcon,
+} from '@mui/icons-material'
 import { useAuth } from '../hooks/useAuth'
-import { encryptionManager } from '../utils/encryption'
+import { useLocalStorage } from '../hooks/useLocalStorage'
 import { VaultItem } from '../utils/storage'
+import { encryptionManager } from '../utils/encryption'
 import { backupManager } from '../utils/backup'
 
-const VaultPage: React.FC = () => {
+interface DecryptedVaultData {
+  type: 'password' | 'note' | 'file'
+  title: string
+  username?: string
+  password?: string
+  url?: string
+  notes?: string
+}
+
+const VaultPage: React.FC = memo(() => {
+  const { isAuthenticated } = useAuth()
   const { isInitialized, storageManager } = useLocalStorage()
-  const { isUnlocked, masterPassword, unlock, lock, isFirstTime, setupMasterPassword, isLoading: authLoading } = useAuth()
   const [items, setItems] = useState<VaultItem[]>([])
+  const [decryptedData, setDecryptedData] = useState<Map<string, DecryptedVaultData>>(new Map())
   const [loading, setLoading] = useState(false)
   const [dialogOpen, setDialogOpen] = useState(false)
+  const [passwordDialogOpen, setPasswordDialogOpen] = useState(false)
+  const [masterPassword, setMasterPassword] = useState('')
+  const [vaultUnlocked, setVaultUnlocked] = useState(false)
   const [editingItem, setEditingItem] = useState<VaultItem | null>(null)
-  const [showPassword, setShowPassword] = useState(false)
-  const [tempPassword, setTempPassword] = useState('')
-  const [newItem, setNewItem] = useState<{
-    type: 'password' | 'note' | 'file'
-    title: string
-    username: string
-    password: string
-    url: string
-    notes: string
-  }>({
+  const [newItem, setNewItem] = useState<DecryptedVaultData>({
     type: 'password',
     title: '',
     username: '',
     password: '',
     url: '',
-    notes: ''
+    notes: '',
+  })
+  const [snackbar, setSnackbar] = useState({
+    open: false,
+    message: '',
+    severity: 'success' as 'success' | 'error',
   })
 
-  useEffect(() => {
-    if (isInitialized && isUnlocked) {
-      loadItems()
-    }
-  }, [isInitialized, isUnlocked])
+  // Unlock vault with master password
+  const unlockVault = async (password: string) => {
+    try {
+      setLoading(true)
+      const vaultItems = await storageManager.getVaultItems()
+      
+      // Try to decrypt one item to verify password
+      if (vaultItems.length > 0) {
+        await encryptionManager.decrypt(vaultItems[0].data, password)
+      }
 
-  const loadItems = async () => {
+      setMasterPassword(password)
+      setVaultUnlocked(true)
+      setPasswordDialogOpen(false)
+      await loadItems(password)
+    } catch (error) {
+      console.error('Failed to unlock vault:', error)
+      showSnackbar('Mật khẩu không đúng', 'error')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  // Load vault items
+  useEffect(() => {
+    if (isAuthenticated && isInitialized && !vaultUnlocked) {
+      setPasswordDialogOpen(true)
+    }
+  }, [isAuthenticated, isInitialized, vaultUnlocked])
+
+  const loadItems = async (password: string = masterPassword) => {
+    if (!password) return
+
     try {
       setLoading(true)
       const vaultItems = await storageManager.getVaultItems()
       setItems(vaultItems)
+
+      // Decrypt all items
+      const decryptedMap = new Map<string, DecryptedVaultData>()
+      for (const item of vaultItems) {
+        try {
+          const decrypted = await encryptionManager.decrypt(item.data, password)
+          const data = JSON.parse(decrypted) as DecryptedVaultData
+          decryptedMap.set(item.id, data)
+        } catch (error) {
+          console.error(`Failed to decrypt item ${item.id}:`, error)
+        }
+      }
+      setDecryptedData(decryptedMap)
     } catch (error) {
       console.error('Failed to load vault items:', error)
+      showSnackbar('Không thể tải vault items', 'error')
     } finally {
       setLoading(false)
-    }
-  }
-
-  const handleAuthSubmit = async () => {
-    if (!tempPassword) return
-    
-    let success = false
-    if (isFirstTime) {
-      success = await setupMasterPassword(tempPassword)
-    } else {
-      success = await unlock(tempPassword)
-    }
-    
-    if (success) {
-      setTempPassword('')
     }
   }
 
   const handleSaveItem = async () => {
-    if (!newItem.title) return
+    if (!masterPassword) return
 
     try {
-      setLoading(true)
-      
-      const itemData = {
-        username: newItem.username,
-        password: newItem.password,
-        url: newItem.url,
-        notes: newItem.notes
+      if (!newItem.title.trim()) {
+        showSnackbar('Vui lòng nhập tiêu đề', 'error')
+        return
       }
 
-      const encryptedData = await encryptionManager.encrypt(
-        JSON.stringify(itemData), 
-        masterPassword
-      )
+      // Encrypt the data
+      const dataToEncrypt = JSON.stringify(newItem)
+      const encryptedData = await encryptionManager.encrypt(dataToEncrypt, masterPassword)
 
-      const item: VaultItem = {
-        id: editingItem?.id || Date.now().toString(),
+      const itemData: VaultItem = {
+        id: editingItem?.id || crypto.randomUUID(),
         type: newItem.type,
         title: newItem.title,
         data: encryptedData,
-        encrypted: true,
         createdAt: editingItem?.createdAt || new Date(),
-        updatedAt: new Date()
+        updatedAt: new Date(),
+        encrypted: true,
       }
 
-      await storageManager.saveVaultItem(item)
+      await storageManager.saveVaultItem(itemData)
+      
+      if (editingItem) {
+        showSnackbar('Cập nhật thành công', 'success')
+      } else {
+        showSnackbar('Thêm mới thành công', 'success')
+      }
+
       await loadItems()
       handleCloseDialog()
     } catch (error) {
       console.error('Failed to save item:', error)
-      alert('Failed to save item')
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  const handleEditItem = async (item: VaultItem) => {
-    try {
-      setLoading(true)
-      const decrypted = await encryptionManager.decrypt(item.data, masterPassword)
-      const itemData = JSON.parse(decrypted)
-      
-      setNewItem({
-        type: item.type,
-        title: item.title,
-        username: itemData.username || '',
-        password: itemData.password || '',
-        url: itemData.url || '',
-        notes: itemData.notes || ''
-      })
-      
-      setEditingItem(item)
-      setDialogOpen(true)
-    } catch (error) {
-      console.error('Failed to decrypt item:', error)
-      alert('Failed to decrypt item')
-    } finally {
-      setLoading(false)
+      showSnackbar('Lỗi khi lưu item', 'error')
     }
   }
 
   const handleDeleteItem = async (id: string) => {
-    if (confirm('Are you sure you want to delete this item?')) {
-      try {
-        await storageManager.deleteVaultItem(id)
-        await loadItems()
-      } catch (error) {
-        console.error('Failed to delete item:', error)
-      }
+    try {
+      await storageManager.deleteVaultItem(id)
+      await loadItems()
+      showSnackbar('Xóa thành công', 'success')
+    } catch (error) {
+      console.error('Failed to delete item:', error)
+      showSnackbar('Lỗi khi xóa item', 'error')
     }
+  }
+
+  const handleEditItem = (item: VaultItem) => {
+    const decrypted = decryptedData.get(item.id)
+    if (!decrypted) return
+
+    setEditingItem(item)
+    setNewItem({ ...decrypted })
+    setDialogOpen(true)
   }
 
   const handleCloseDialog = () => {
@@ -172,287 +199,335 @@ const VaultPage: React.FC = () => {
       username: '',
       password: '',
       url: '',
-      notes: ''
+      notes: '',
     })
   }
 
-  const generatePassword = () => {
-    const password = encryptionManager.generateSecureString(16)
-    setNewItem({ ...newItem, password })
+  const handleCopyToClipboard = async (item: VaultItem) => {
+    const decrypted = decryptedData.get(item.id)
+    if (!decrypted) return
+
+    const textToCopy = decrypted.password || decrypted.notes || ''
+    try {
+      await navigator.clipboard.writeText(textToCopy)
+      showSnackbar('Đã sao chép', 'success')
+    } catch (error) {
+      console.error('Failed to copy:', error)
+      showSnackbar('Lỗi khi sao chép', 'error')
+    }
   }
 
-  const copyToClipboard = (text: string) => {
-    navigator.clipboard.writeText(text)
-  }
+  const handleExport = async () => {
+    if (!masterPassword) return
 
-  const handleExportBackup = async () => {
     try {
       const blob = await backupManager.exportToFile(masterPassword)
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
-      a.download = `visecure-backup-${new Date().toISOString().split('T')[0]}.vsbak`
+      a.download = `visecure-backup-${new Date().toISOString().split('T')[0]}.json`
       document.body.appendChild(a)
       a.click()
       document.body.removeChild(a)
       URL.revokeObjectURL(url)
+      showSnackbar('Xuất dữ liệu thành công', 'success')
     } catch (error) {
       console.error('Export failed:', error)
-      alert('Export failed')
+      showSnackbar('Lỗi khi xuất dữ liệu', 'error')
     }
   }
 
-  // Show loading spinner while initializing
-  if (!isInitialized || authLoading) {
+  const showSnackbar = (message: string, severity: 'success' | 'error') => {
+    setSnackbar({ open: true, message, severity })
+  }
+
+  const getItemIcon = (type: string) => {
+    switch (type) {
+      case 'password':
+        return '🔐'
+      case 'note':
+        return '📝'
+      case 'file':
+        return '📁'
+      default:
+        return '🔐'
+    }
+  }
+
+  if (!isAuthenticated) {
     return (
-      <Container>
-        <Box display="flex" justifyContent="center" alignItems="center" minHeight="60vh">
-          <CircularProgress />
-          <Typography sx={{ ml: 2 }}>
-            {!isInitialized ? 'Initializing secure storage...' : 'Loading...'}
-          </Typography>
-        </Box>
-      </Container>
+      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '50vh' }}>
+        <Typography>Vui lòng đăng nhập để truy cập Vault</Typography>
+      </Box>
     )
   }
 
-  // Show auth screen if not unlocked
-  if (!isUnlocked) {
+  if (!vaultUnlocked) {
     return (
-      <Container maxWidth="sm">
-        <Box display="flex" flexDirection="column" alignItems="center" mt={4}>
-          <Typography variant="h4" gutterBottom>
-            ViSecure Vault
-          </Typography>
-          <Typography variant="body1" color="textSecondary" textAlign="center" mb={3}>
-            {isFirstTime 
-              ? 'Create your master password to secure your vault' 
-              : 'Enter your master password to unlock your vault'
-            }
-          </Typography>
+      <Dialog open={passwordDialogOpen} onClose={() => setPasswordDialogOpen(false)} maxWidth="sm" fullWidth>
+        <DialogTitle>Mở khóa Vault</DialogTitle>
+        <DialogContent>
           <TextField
+            autoFocus
+            label="Master Password"
+            type="password"
             fullWidth
-            type={showPassword ? 'text' : 'password'}
-            label={isFirstTime ? 'Create Master Password' : 'Master Password'}
-            value={tempPassword}
-            onChange={(e) => setTempPassword(e.target.value)}
-            onKeyPress={(e) => e.key === 'Enter' && handleAuthSubmit()}
             margin="normal"
-            InputProps={{
-              endAdornment: (
-                <InputAdornment position="end">
-                  <Button
-                    size="small"
-                    onClick={() => setShowPassword(!showPassword)}
-                  >
-                    {showPassword ? 'Hide' : 'Show'}
-                  </Button>
-                </InputAdornment>
-              )
+            value={masterPassword}
+            onChange={(e) => setMasterPassword(e.target.value)}
+            onKeyPress={(e) => {
+              if (e.key === 'Enter') {
+                unlockVault(masterPassword)
+              }
             }}
           />
-          <Button
-            variant="contained"
-            fullWidth
-            onClick={handleAuthSubmit}
-            disabled={!tempPassword || authLoading}
-            sx={{ mt: 2 }}
-          >
-            {isFirstTime ? 'Create Vault' : 'Unlock Vault'}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setPasswordDialogOpen(false)}>Hủy</Button>
+          <Button variant="contained" onClick={() => unlockVault(masterPassword)} disabled={!masterPassword || loading}>
+            {loading ? <CircularProgress size={20} /> : 'Mở khóa'}
           </Button>
-        </Box>
-      </Container>
+        </DialogActions>
+      </Dialog>
     )
   }
 
-  // Main vault interface
+  if (loading && items.length === 0) {
+    return (
+      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '50vh' }}>
+        <CircularProgress />
+      </Box>
+    )
+  }
+
   return (
-    <Container>
-      <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
-        <Typography variant="h4">
+    <Box sx={{ p: 2, pb: 10 }}>
+      {/* Header */}
+      <Box sx={{ mb: 3 }}>
+        <Typography variant="h4" component="h1" gutterBottom>
           Vault
         </Typography>
-        <Box>
-          <Button
-            variant="outlined"
-            onClick={handleExportBackup}
-            sx={{ mr: 1 }}
-          >
-            Backup
-          </Button>
-          <Button
-            variant="outlined"
-            onClick={lock}
-          >
-            Lock
-          </Button>
-        </Box>
+        <Typography variant="body2" color="text.secondary">
+          Quản lý mật khẩu và thông tin bảo mật
+        </Typography>
       </Box>
 
-      {loading ? (
-        <Box display="flex" justifyContent="center" py={4}>
-          <CircularProgress />
-        </Box>
-      ) : items.length === 0 ? (
-        <Alert severity="info">
-          Your vault is empty. Add your first password or note to get started.
-        </Alert>
+      {/* Quick Actions */}
+      <Card sx={{ mb: 3 }}>
+        <CardContent>
+          <Typography variant="h6" gutterBottom>
+            Thao tác nhanh
+          </Typography>
+          <Grid container spacing={2}>
+            <Grid item xs={6}>
+              <Button
+                variant="outlined"
+                fullWidth
+                startIcon={<ExportIcon />}
+                onClick={handleExport}
+              >
+                Xuất dữ liệu
+              </Button>
+            </Grid>
+            <Grid item xs={6}>
+              <Button
+                variant="outlined"
+                fullWidth
+                startIcon={<ImportIcon />}
+                disabled
+              >
+                Nhập dữ liệu
+              </Button>
+            </Grid>
+          </Grid>
+        </CardContent>
+      </Card>
+
+      {/* Vault Items */}
+      {items.length === 0 ? (
+        <Card>
+          <CardContent sx={{ textAlign: 'center', py: 6 }}>
+            <Typography variant="h6" color="text.secondary" gutterBottom>
+              Chưa có mật khẩu nào
+            </Typography>
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
+              Thêm mật khẩu đầu tiên để bắt đầu
+            </Typography>
+            <Button
+              variant="contained"
+              startIcon={<AddIcon />}
+              onClick={() => setDialogOpen(true)}
+            >
+              Thêm mật khẩu
+            </Button>
+          </CardContent>
+        </Card>
       ) : (
         <List>
           {items.map((item) => (
             <Card key={item.id} sx={{ mb: 2 }}>
-              <CardContent>
-                <ListItem>
-                  <ListItemText
-                    primary={item.title}
-                    secondary={
-                      <Box>
-                        <Chip
-                          label={item.type}
-                          size="small"
-                          sx={{ mr: 1 }}
-                        />
-                        <Typography variant="caption" color="textSecondary">
-                          {new Date(item.updatedAt).toLocaleDateString()}
-                        </Typography>
-                      </Box>
-                    }
-                  />
-                  <ListItemSecondaryAction>
-                    <Button
+              <ListItem
+                secondaryAction={
+                  <Box>
+                    <IconButton
+                      onClick={() => handleCopyToClipboard(item)}
                       size="small"
-                      onClick={() => handleEditItem(item)}
-                      sx={{ mr: 1 }}
                     >
-                      Edit
-                    </Button>
-                    <Button
+                      <CopyIcon />
+                    </IconButton>
+                    <IconButton
+                      onClick={() => handleEditItem(item)}
+                      size="small"
+                    >
+                      <EditIcon />
+                    </IconButton>
+                    <IconButton
+                      onClick={() => handleDeleteItem(item.id)}
                       size="small"
                       color="error"
-                      onClick={() => handleDeleteItem(item.id)}
                     >
-                      Delete
-                    </Button>
-                  </ListItemSecondaryAction>
-                </ListItem>
-              </CardContent>
+                      <DeleteIcon />
+                    </IconButton>
+                  </Box>
+                }
+              >
+                <ListItemText
+                  primary={
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                      <span>{getItemIcon(item.type)}</span>
+                      <Typography variant="body1" fontWeight="medium">
+                        {item.title}
+                      </Typography>
+                      <Chip label={item.type} size="small" variant="outlined" />
+                    </Box>
+                  }
+                  secondary={
+                    <Box sx={{ mt: 1 }}>
+                      {decryptedData.get(item.id)?.username && (
+                        <Typography variant="body2" color="text.secondary">
+                          Username: {decryptedData.get(item.id)?.username}
+                        </Typography>
+                      )}
+                      {decryptedData.get(item.id)?.url && (
+                        <Typography variant="body2" color="text.secondary">
+                          URL: {decryptedData.get(item.id)?.url}
+                        </Typography>
+                      )}
+                      <Typography variant="caption" color="text.disabled">
+                        Cập nhật: {new Date(item.updatedAt).toLocaleDateString('vi-VN')}
+                      </Typography>
+                    </Box>
+                  }
+                />
+              </ListItem>
             </Card>
           ))}
         </List>
       )}
 
-      <Button
-        variant="contained"
+      {/* Add Button */}
+      <Fab
         color="primary"
         onClick={() => setDialogOpen(true)}
         sx={{
           position: 'fixed',
-          bottom: 80,
-          right: 16,
-          borderRadius: '50px',
-          minWidth: 'auto',
-          width: 56,
-          height: 56,
+          bottom: 90,
+          right: 20,
         }}
       >
-        +
-      </Button>
+        <AddIcon />
+      </Fab>
 
+      {/* Add/Edit Dialog */}
       <Dialog open={dialogOpen} onClose={handleCloseDialog} maxWidth="sm" fullWidth>
         <DialogTitle>
-          {editingItem ? 'Edit Item' : 'Add New Item'}
+          {editingItem ? 'Chỉnh sửa' : 'Thêm mới'}
         </DialogTitle>
         <DialogContent>
           <FormControl fullWidth margin="normal">
-            <InputLabel>Type</InputLabel>
+            <InputLabel>Loại</InputLabel>
             <Select
               value={newItem.type}
-              onChange={(e) => setNewItem({ ...newItem, type: e.target.value as any })}
+              onChange={(e) => setNewItem({ ...newItem, type: e.target.value as 'password' | 'note' | 'file' })}
             >
-              <MenuItem value="password">Password</MenuItem>
-              <MenuItem value="note">Secure Note</MenuItem>
+              <MenuItem value="password">Mật khẩu</MenuItem>
+              <MenuItem value="note">Ghi chú</MenuItem>
               <MenuItem value="file">File</MenuItem>
             </Select>
           </FormControl>
 
           <TextField
-            fullWidth
-            label="Title"
+            label="Tiêu đề"
             value={newItem.title}
             onChange={(e) => setNewItem({ ...newItem, title: e.target.value })}
+            fullWidth
             margin="normal"
-            required
           />
 
           {newItem.type === 'password' && (
             <>
               <TextField
-                fullWidth
                 label="Username/Email"
                 value={newItem.username}
                 onChange={(e) => setNewItem({ ...newItem, username: e.target.value })}
+                fullWidth
                 margin="normal"
               />
-              
-              <Box display="flex" gap={1}>
-                <TextField
-                  fullWidth
-                  label="Password"
-                  value={newItem.password}
-                  onChange={(e) => setNewItem({ ...newItem, password: e.target.value })}
-                  margin="normal"
-                  type="password"
-                  InputProps={{
-                    endAdornment: (
-                      <InputAdornment position="end">
-                        <Button
-                          size="small"
-                          onClick={() => copyToClipboard(newItem.password)}
-                        >
-                          Copy
-                        </Button>
-                      </InputAdornment>
-                    )
-                  }}
-                />
-                <Button
-                  onClick={generatePassword}
-                  variant="outlined"
-                  sx={{ mt: 2 }}
-                >
-                  Generate
-                </Button>
-              </Box>
-
               <TextField
+                label="Mật khẩu"
+                type="password"
+                value={newItem.password}
+                onChange={(e) => setNewItem({ ...newItem, password: e.target.value })}
                 fullWidth
-                label="Website URL"
+                margin="normal"
+              />
+              <TextField
+                label="URL"
                 value={newItem.url}
                 onChange={(e) => setNewItem({ ...newItem, url: e.target.value })}
+                fullWidth
                 margin="normal"
               />
             </>
           )}
 
           <TextField
-            fullWidth
-            label="Notes"
+            label="Ghi chú"
             value={newItem.notes}
             onChange={(e) => setNewItem({ ...newItem, notes: e.target.value })}
+            fullWidth
             margin="normal"
             multiline
             rows={3}
           />
         </DialogContent>
         <DialogActions>
-          <Button onClick={handleCloseDialog}>Cancel</Button>
-          <Button onClick={handleSaveItem} variant="contained" disabled={loading}>
-            {editingItem ? 'Update' : 'Save'}
+          <Button onClick={handleCloseDialog}>Hủy</Button>
+          <Button variant="contained" onClick={handleSaveItem}>
+            {editingItem ? 'Cập nhật' : 'Thêm'}
           </Button>
         </DialogActions>
       </Dialog>
-    </Container>
-  )
-}
 
+      {/* Snackbar */}
+      <Snackbar
+        open={snackbar.open}
+        autoHideDuration={3000}
+        onClose={() => setSnackbar({ ...snackbar, open: false })}
+      >
+        <Alert
+          onClose={() => setSnackbar({ ...snackbar, open: false })}
+          severity={snackbar.severity}
+          sx={{ width: '100%' }}
+        >
+          {snackbar.message}
+        </Alert>
+      </Snackbar>
+    </Box>
+  )
+})
+
+VaultPage.displayName = 'VaultPage'
+
+export { VaultPage }
 export default VaultPage
