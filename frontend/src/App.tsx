@@ -17,6 +17,7 @@ const VpnPage = lazy(() => import('./pages/VpnPage'))
 const ProfilePage = lazy(() => import('./pages/ProfilePage'))
 import Layout from './components/Layout'
 import Preloader from './components/Preloader'
+import AuthGuard from './components/AuthGuard'
 import { performanceMonitor } from './utils/performance'
 
 const navigationItems = [
@@ -57,22 +58,23 @@ function App() {
   }
 
   return (
-    <Layout>
-      <Box sx={{ 
-        flex: 1, 
-        overflow: 'auto',
-        transition: 'all 0.2s ease-in-out',
-      }}>
-        <Suspense fallback={<Preloader message="Đang tải trang..." />}>
-          <Routes>
-            <Route path="/" element={<HomePage />} />
-            <Route path="/vault" element={<VaultPage />} />
-            <Route path="/scanner" element={<ScannerPage />} />
-            <Route path="/vpn" element={<VpnPage />} />
-            <Route path="/profile" element={<ProfilePage />} />
-          </Routes>
-        </Suspense>
-      </Box>
+    <AuthGuard>
+      <Layout>
+        <Box sx={{ 
+          flex: 1, 
+          overflow: 'auto',
+          transition: 'all 0.2s ease-in-out',
+        }}>
+          <Suspense fallback={<Preloader message="Đang tải trang..." />}>
+            <Routes>
+              <Route path="/" element={<HomePage />} />
+              <Route path="/vault" element={<VaultPage />} />
+              <Route path="/scanner" element={<ScannerPage />} />
+              <Route path="/vpn" element={<VpnPage />} />
+              <Route path="/profile" element={<ProfilePage />} />
+            </Routes>
+          </Suspense>
+        </Box>
       
       <Box
         sx={{
@@ -136,6 +138,7 @@ function App() {
       </BottomNavigation>
     </Box>
     </Layout>
+    </AuthGuard>
   )
 }
 

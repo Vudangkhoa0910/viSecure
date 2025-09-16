@@ -1,93 +1,37 @@
 import { Router, Request, Response } from 'express'
-import { body } from 'express-validator'
 
 const router = Router()
 
-// @desc    Register user
-// @route   POST /api/auth/register
+// @desc    Health check for auth service
+// @route   GET /api/auth/health
 // @access  Public
-router.post('/register', [
-  body('email').isEmail().normalizeEmail(),
-  body('password').isLength({ min: 8 }).withMessage('Password must be at least 8 characters'),
-  body('name').trim().isLength({ min: 2 }).withMessage('Name must be at least 2 characters'),
-], async (req: Request, res: Response) => {
-  try {
-    res.status(201).json({
-      success: true,
-      message: 'User registered successfully',
-      data: {
-        user: {
-          id: '1',
-          email: req.body.email,
-          name: req.body.name,
-        },
-        token: 'sample-jwt-token',
-      },
-    })
-  } catch (error) {
-    res.status(500).json({
-      success: false,
-      error: {
-        message: 'Registration failed',
-      },
-    })
-  }
+// Note: ViSecure uses local authentication - no server-side auth required
+router.get('/health', async (req: Request, res: Response) => {
+  res.status(200).json({
+    success: true,
+    message: 'Auth service healthy - Local authentication in use',
+    data: {
+      authType: 'local',
+      serverRequired: false,
+      features: ['master-password', 'biometric', 'device-binding'],
+    },
+  })
 })
 
-// @desc    Login user
-// @route   POST /api/auth/login
+// @desc    Get auth configuration
+// @route   GET /api/auth/config
 // @access  Public
-router.post('/login', [
-  body('email').isEmail().normalizeEmail(),
-  body('password').notEmpty().withMessage('Password is required'),
-], async (req: Request, res: Response) => {
-  try {
-    res.status(200).json({
-      success: true,
-      message: 'Login successful',
-      data: {
-        user: {
-          id: '1',
-          email: req.body.email,
-          name: 'User Name',
-        },
-        token: 'sample-jwt-token',
-      },
-    })
-  } catch (error) {
-    res.status(401).json({
-      success: false,
-      error: {
-        message: 'Invalid credentials',
-      },
-    })
-  }
-})
-
-// @desc    Get current user
-// @route   GET /api/auth/me
-// @access  Private
-router.get('/me', async (req: Request, res: Response) => {
-  try {
-    res.status(200).json({
-      success: true,
-      data: {
-        user: {
-          id: '1',
-          email: 'user@example.com',
-          name: 'User Name',
-          createdAt: new Date(),
-        },
-      },
-    })
-  } catch (error) {
-    res.status(401).json({
-      success: false,
-      error: {
-        message: 'Not authorized',
-      },
-    })
-  }
+router.get('/config', async (req: Request, res: Response) => {
+  res.status(200).json({
+    success: true,
+    data: {
+      authType: 'local',
+      biometricSupported: true,
+      sessionTimeout: 15 * 60 * 1000, // 15 minutes
+      maxFailedAttempts: 3,
+      lockoutDuration: 30 * 60 * 1000, // 30 minutes
+    },
+  })
 })
 
 export default router

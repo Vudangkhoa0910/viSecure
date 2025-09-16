@@ -1,189 +1,225 @@
-/**
- * ViSecure Auth Hook
- * Quản lý authentication state với master password
- */
+import { useState, useEffect, useCallback } from 'react'
+import { localAuth } from '../services/localAuth'
+import { biometricAuth } from '../services/biometricAuth'
 
-import { useState, useEffect } from 'react'
-import { storageManager } from '../utils/storage'
-import { encryptionManager } from '../utils/encryption'
-
-export interface AuthState {
-  isUnlocked: boolean
+interface AuthState {
+  isAuthenticated: boolean
+  isSetup: boolean
   isLoading: boolean
-  isFirstTime: boolean
-  error: string | null
+  deviceTrusted: boolean
+  failedAttempts: number
+  lockedUntil?: number
+  biometricAvailable: boolean
+  biometricConfigured: boolean
 }
 
 export const useAuth = () => {
-  const [state, setState] = useState<AuthState>({
-    isUnlocked: false,
+  const [authState, setAuthState] = useState<AuthState>({
+    isAuthenticated: false,
+    isSetup: false,
     isLoading: true,
-    isFirstTime: false,
-    error: null
+    deviceTrusted: false,
+    failedAttempts: 0,
+    biometricAvailable: false,
+    biometricConfigured: false,
   })
-  
-  const [masterPassword, setMasterPassword] = useState<string>('')
 
-  useEffect(() => {
-    checkAuthStatus()
+  // Initialize auth state
+  const initializeAuth = useCallback(async () => {
+    try {
+      setAuthState(prev => ({ ...prev, isLoading: true }))
+      
+      const authStatus = await localAuth.getAuthStatus()
+      const biometricStatus = await biometricAuth.getStatus()
+      
+      setAuthState({
+        isAuthenticated: authStatus.isAuthenticated,
+        isSetup: authStatus.isSetup,
+        isLoading: false,
+        deviceTrusted: authStatus.deviceTrusted,
+        failedAttempts: authStatus.failedAttempts,
+        lockedUntil: authStatus.lockedUntil,
+        biometricAvailable: biometricStatus.available,
+        biometricConfigured: biometricStatus.configured,
+      })
+    } catch (error) {
+      console.error('Failed to initialize auth:', error)
+      setAuthState(prev => ({ ...prev, isLoading: false }))
+    }
   }, [])
 
-  const checkAuthStatus = async () => {
+  // Setup master password
+  const setupMasterPassword = useCallback(async (password: string): Promise<boolean> => {
     try {
-      setState(prev => ({ ...prev, isLoading: true }))
-      
-      const storedHash = await storageManager.getSetting('masterPasswordHash')
-      const isFirstTime = !storedHash
-      
-      setState({
-        isUnlocked: false,
-        isLoading: false,
-        isFirstTime,
-        error: null
-      })
+      const success = await localAuth.setupMasterPassword(password)
+      if (success) {
+        await initializeAuth()
+      }
+      return success
     } catch (error) {
-      setState({
-        isUnlocked: false,
-        isLoading: false,
-        isFirstTime: false,
-        error: error instanceof Error ? error.message : 'Auth check failed'
-      })
-    }
-  }
-
-  const setupMasterPassword = async (password: string): Promise<boolean> => {
-    try {
-      setState(prev => ({ ...prev, isLoading: true, error: null }))
-      
-      const hash = await encryptionManager.hashPassword(password)
-      await storageManager.saveSetting('masterPasswordHash', hash)
-      
-      setMasterPassword(password)
-      setState({
-        isUnlocked: true,
-        isLoading: false,
-        isFirstTime: false,
-        error: null
-      })
-      
-      return true
-    } catch (error) {
-      setState(prev => ({
-        ...prev,
-        isLoading: false,
-        error: error instanceof Error ? error.message : 'Setup failed'
-      }))
+      console.error('Failed to setup master password:', error)
       return false
     }
-  }
+  }, [initializeAuth])
 
-  const unlock = async (password: string): Promise<boolean> => {
+  // Login with master password
+  const loginWithPassword = useCallback(async (password: string): Promise<boolean> => {
     try {
-      setState(prev => ({ ...prev, isLoading: true, error: null }))
-      
-      const storedHash = await storageManager.getSetting('masterPasswordHash')
-      
-      if (!storedHash) {
-        throw new Error('No master password set')
+      const success = await localAuth.verifyMasterPassword(password)
+      if (success) {
+        await initializeAuth()
+      }
+      return success
+    } catch (error) {
+      console.error('Failed to login with password:', error)
+      return false
+    }
+  }, [initializeAuth])
+
+  // Login with biometric
+  const loginWithBiometric = useCallback(async (): Promise<boolean> => {
+    try {
+      if (!authState.biometricConfigured) {
+        throw new Error('Biometric not configured')
       }
       
-      const isValid = await encryptionManager.verifyPassword(password, storedHash)
-      
-      if (!isValid) {
-        setState(prev => ({
-          ...prev,
-          isLoading: false,
-          error: 'Incorrect master password'
-        }))
-        return false
+      const success = await biometricAuth.authenticate()
+      if (success) {
+        await localAuth.createSession()
+        await initializeAuth()
       }
-      
-      setMasterPassword(password)
-      setState({
-        isUnlocked: true,
-        isLoading: false,
-        isFirstTime: false,
-        error: null
+      return success
+    } catch (error) {
+      console.error('Failed to login with biometric:', error)
+      return false
+    }
+  }, [authState.biometricConfigured, initializeAuth])
+
+  // Setup biometric
+  const setupBiometric = useCallback(async (): Promise<boolean> => {
+    try {
+      const success = await biometricAuth.setupBiometric()
+      if (success) {
+        await initializeAuth()
+      }
+      return success
+    } catch (error) {
+      console.error('Failed to setup biometric:', error)
+      return false
+    }
+  }, [initializeAuth])
+
+  // Disable biometric
+  const disableBiometric = useCallback(async (): Promise<boolean> => {
+    try {
+      const success = await biometricAuth.disableBiometric()
+      if (success) {
+        await initializeAuth()
+      }
+      return success
+    } catch (error) {
+      console.error('Failed to disable biometric:', error)
+      return false
+    }
+  }, [initializeAuth])
+
+  // Change master password
+  const changeMasterPassword = useCallback(async (currentPassword: string, newPassword: string): Promise<boolean> => {
+    try {
+      const success = await localAuth.changeMasterPassword(currentPassword, newPassword)
+      if (success) {
+        await initializeAuth()
+      }
+      return success
+    } catch (error) {
+      console.error('Failed to change master password:', error)
+      return false
+    }
+  }, [initializeAuth])
+
+  // Logout
+  const logout = useCallback(async (): Promise<void> => {
+    try {
+      await localAuth.clearSession()
+      await initializeAuth()
+    } catch (error) {
+      console.error('Failed to logout:', error)
+    }
+  }, [initializeAuth])
+
+  // Extend session
+  const extendSession = useCallback(async (): Promise<void> => {
+    try {
+      await localAuth.extendSession()
+    } catch (error) {
+      console.error('Failed to extend session:', error)
+    }
+  }, [])
+
+  // Validate session
+  const validateSession = useCallback(async (): Promise<boolean> => {
+    try {
+      const isValid = await localAuth.validateSession()
+      if (!isValid && authState.isAuthenticated) {
+        await initializeAuth()
+      }
+      return isValid
+    } catch (error) {
+      console.error('Failed to validate session:', error)
+      return false
+    }
+  }, [authState.isAuthenticated, initializeAuth])
+
+  // Auto-validate session on mount and periodically
+  useEffect(() => {
+    initializeAuth()
+  }, [initializeAuth])
+
+  // Auto-validate session every 5 minutes
+  useEffect(() => {
+    if (!authState.isAuthenticated) return
+
+    const interval = setInterval(async () => {
+      await validateSession()
+    }, 5 * 60 * 1000) // 5 minutes
+
+    return () => clearInterval(interval)
+  }, [authState.isAuthenticated, validateSession])
+
+  // Extend session on user activity
+  useEffect(() => {
+    if (!authState.isAuthenticated) return
+
+    const handleActivity = () => {
+      extendSession()
+    }
+
+    const events = ['mousedown', 'mousemove', 'keypress', 'scroll', 'touchstart']
+    events.forEach(event => {
+      document.addEventListener(event, handleActivity, { passive: true })
+    })
+
+    return () => {
+      events.forEach(event => {
+        document.removeEventListener(event, handleActivity)
       })
-      
-      return true
-    } catch (error) {
-      setState(prev => ({
-        ...prev,
-        isLoading: false,
-        error: error instanceof Error ? error.message : 'Unlock failed'
-      }))
-      return false
     }
-  }
-
-  const lock = () => {
-    setMasterPassword('')
-    setState(prev => ({
-      ...prev,
-      isUnlocked: false,
-      error: null
-    }))
-  }
-
-  const changeMasterPassword = async (oldPassword: string, newPassword: string): Promise<boolean> => {
-    try {
-      setState(prev => ({ ...prev, isLoading: true, error: null }))
-      
-      // Verify old password
-      const storedHash = await storageManager.getSetting('masterPasswordHash')
-      const isOldValid = await encryptionManager.verifyPassword(oldPassword, storedHash)
-      
-      if (!isOldValid) {
-        setState(prev => ({
-          ...prev,
-          isLoading: false,
-          error: 'Current password is incorrect'
-        }))
-        return false
-      }
-      
-      // Re-encrypt all vault items with new password
-      const vaultItems = await storageManager.getVaultItems()
-      
-      for (const item of vaultItems) {
-        if (item.encrypted) {
-          // Decrypt with old password and re-encrypt with new password
-          const decrypted = await encryptionManager.decrypt(item.data, oldPassword)
-          const reencrypted = await encryptionManager.encrypt(decrypted, newPassword)
-          
-          item.data = reencrypted
-          item.updatedAt = new Date()
-          
-          await storageManager.saveVaultItem(item)
-        }
-      }
-      
-      // Update master password hash
-      const newHash = await encryptionManager.hashPassword(newPassword)
-      await storageManager.saveSetting('masterPasswordHash', newHash)
-      
-      setMasterPassword(newPassword)
-      setState(prev => ({ ...prev, isLoading: false }))
-      
-      return true
-    } catch (error) {
-      setState(prev => ({
-        ...prev,
-        isLoading: false,
-        error: error instanceof Error ? error.message : 'Password change failed'
-      }))
-      return false
-    }
-  }
+  }, [authState.isAuthenticated, extendSession])
 
   return {
-    ...state,
-    masterPassword,
+    // State
+    ...authState,
+    
+    // Actions
     setupMasterPassword,
-    unlock,
-    lock,
+    loginWithPassword,
+    loginWithBiometric,
+    setupBiometric,
+    disableBiometric,
     changeMasterPassword,
-    checkAuthStatus
+    logout,
+    extendSession,
+    validateSession,
+    refresh: initializeAuth,
   }
 }

@@ -1,4 +1,4 @@
-# ViSecure Frontend
+3# ViSecure Frontend
 
 React + TypeScript + Vite application for ViSecure mobile security solution.
 
