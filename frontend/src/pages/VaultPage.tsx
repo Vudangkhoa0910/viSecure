@@ -32,12 +32,14 @@ import {
   ContentCopy as CopyIcon,
   GetApp as ExportIcon,
   Publish as ImportIcon,
+  Sync as SyncIcon,
 } from '@mui/icons-material'
 import { useAuth } from '../hooks/useAuth'
 import { useLocalStorage } from '../hooks/useLocalStorage'
 import { VaultItem } from '../utils/storage'
 import { encryptionManager } from '../utils/encryption'
 import { backupManager } from '../utils/backup'
+import SyncComponent from '../components/SyncComponent'
 
 interface DecryptedVaultData {
   type: 'password' | 'note' | 'file'
@@ -72,6 +74,7 @@ const VaultPage: React.FC = memo(() => {
     message: '',
     severity: 'success' as 'success' | 'error',
   })
+  const [syncDialogOpen, setSyncDialogOpen] = useState(false)
 
   // Unlock vault with master password
   const unlockVault = async (password: string) => {
@@ -319,7 +322,7 @@ const VaultPage: React.FC = memo(() => {
             Thao tác nhanh
           </Typography>
           <Grid container spacing={2}>
-            <Grid item xs={6}>
+            <Grid item xs={4}>
               <Button
                 variant="outlined"
                 fullWidth
@@ -329,7 +332,17 @@ const VaultPage: React.FC = memo(() => {
                 Xuất dữ liệu
               </Button>
             </Grid>
-            <Grid item xs={6}>
+            <Grid item xs={4}>
+              <Button
+                variant="outlined"
+                fullWidth
+                startIcon={<SyncIcon />}
+                onClick={() => setSyncDialogOpen(true)}
+              >
+                Đồng bộ
+              </Button>
+            </Grid>
+            <Grid item xs={4}>
               <Button
                 variant="outlined"
                 fullWidth
@@ -523,6 +536,12 @@ const VaultPage: React.FC = memo(() => {
           {snackbar.message}
         </Alert>
       </Snackbar>
+
+      {/* Sync Component */}
+      <SyncComponent 
+        open={syncDialogOpen} 
+        onClose={() => setSyncDialogOpen(false)} 
+      />
     </Box>
   )
 })

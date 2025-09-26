@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { localAuth } from '../services/localAuth'
 import { biometricAuth } from '../services/biometricAuth'
+import { dbInitializer, AUTH_DB_CONFIG } from '../utils/databaseInitializer'
 
 interface AuthState {
   isAuthenticated: boolean
@@ -24,15 +25,30 @@ export const useAuth = () => {
     biometricConfigured: false,
   })
 
-  // Initialize auth state
+  // Initialize authentication
   const initializeAuth = useCallback(async () => {
     try {
       setAuthState(prev => ({ ...prev, isLoading: true }))
       
+      // Only clear database in development mode with explicit flag
+      const isDev = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
+      if (isDev && localStorage.getItem('clear-db') === 'true') {
+        try {
+          await dbInitializer.deleteDatabase('ViSecureDB')
+          localStorage.removeItem('clear-db')
+          console.log('Development: Cleared existing database for fresh start')
+        } catch (error) {
+          console.log('Development: No existing database to clear or deletion failed')
+        }
+      }
+      
+      // Ensure database is initialized first
+      await dbInitializer.initializeDatabase(AUTH_DB_CONFIG)
+      
       const authStatus = await localAuth.getAuthStatus()
       const biometricStatus = await biometricAuth.getStatus()
       
-      setAuthState({
+      const newAuthState = {
         isAuthenticated: authStatus.isAuthenticated,
         isSetup: authStatus.isSetup,
         isLoading: false,
@@ -41,14 +57,16 @@ export const useAuth = () => {
         lockedUntil: authStatus.lockedUntil,
         biometricAvailable: biometricStatus.available,
         biometricConfigured: biometricStatus.configured,
-      })
+      }
+      
+      setAuthState(newAuthState)
+      
+      console.log('🔄 Auth state updated:', newAuthState)
     } catch (error) {
       console.error('Failed to initialize auth:', error)
       setAuthState(prev => ({ ...prev, isLoading: false }))
     }
-  }, [])
-
-  // Setup master password
+  }, [])  // Setup master password
   const setupMasterPassword = useCallback(async (password: string): Promise<boolean> => {
     try {
       const success = await localAuth.setupMasterPassword(password)

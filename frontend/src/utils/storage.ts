@@ -38,7 +38,7 @@ export interface BackupMetadata {
 
 class LocalStorageManager {
   private dbName = 'ViSecureDB'
-  private version = 1
+  private version = 2
   private db: IDBDatabase | null = null
 
   async init(): Promise<void> {

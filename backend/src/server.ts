@@ -9,7 +9,6 @@ import dotenv from 'dotenv'
 // Import routes (only stateless services)
 import scannerRoutes from './routes/scanner'
 import newsRoutes from './routes/news'
-import vpnRoutes from './routes/vpn'
 
 // Import middleware
 import { errorHandler } from './middleware/errorHandler'
@@ -62,7 +61,6 @@ app.get('/health', (req: express.Request, res: express.Response) => {
 // API routes (stateless services only)
 app.use('/api/scanner', scannerRoutes)
 app.use('/api/news', newsRoutes)
-app.use('/api/vpn', vpnRoutes)
 
 // Error handling middleware
 app.use(notFound)

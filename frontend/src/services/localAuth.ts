@@ -3,6 +3,8 @@
  * Handles all authentication locally without server dependencies
  */
 
+import { withTransaction } from '../utils/databaseInitializer'
+
 interface AuthConfig {
   hash: number[]
   salt: number[]
@@ -258,111 +260,81 @@ export class LocalAuthManager {
 
   // Storage Helpers
   private async saveToStorage<T>(key: string, data: T): Promise<void> {
-    try {
-      // Use IndexedDB for secure storage
-      const request = indexedDB.open('ViSecureDB', 1)
-      
-      return new Promise((resolve, reject) => {
-        request.onerror = () => reject(request.error)
+    const maxRetries = 3
+    let retries = 0
+    
+    while (retries < maxRetries) {
+      try {
+        return await withTransaction('auth', 'readwrite', async (_, store) => {
+          return new Promise<void>((resolve, reject) => {
+            const objectStore = store as IDBObjectStore
+            const request = objectStore.put(data, key)
+            
+            request.onsuccess = () => resolve()
+            request.onerror = () => reject(request.error)
+          })
+        })
+      } catch (error: any) {
+        retries++
+        console.warn(`Storage attempt ${retries} failed:`, error.message)
         
-        request.onupgradeneeded = () => {
-          const db = request.result
-          if (!db.objectStoreNames.contains('auth')) {
-            db.createObjectStore('auth')
-          }
+        if (error.name === 'NotFoundError' && retries < maxRetries) {
+          // Wait a bit and retry
+          await new Promise(resolve => setTimeout(resolve, 100 * retries))
+          continue
         }
         
-        request.onsuccess = () => {
-          const db = request.result
-          const transaction = db.transaction(['auth'], 'readwrite')
-          const store = transaction.objectStore('auth')
-          
-          store.put(data, key)
-          
-          transaction.oncomplete = () => {
-            db.close()
-            resolve()
-          }
-          
-          transaction.onerror = () => reject(transaction.error)
-        }
-      })
-    } catch (error) {
-      console.error('Failed to save to storage:', error)
-      throw error
+        throw error
+      }
     }
   }
 
   private async getFromStorage<T>(key: string): Promise<T | null> {
-    try {
-      const request = indexedDB.open('ViSecureDB', 1)
-      
-      return new Promise((resolve, reject) => {
-        request.onerror = () => reject(request.error)
+    const maxRetries = 3
+    let retries = 0
+    
+    while (retries < maxRetries) {
+      try {
+        return await withTransaction('auth', 'readonly', async (_, store) => {
+          return new Promise<T | null>((resolve, reject) => {
+            const objectStore = store as IDBObjectStore
+            const request = objectStore.get(key)
+            
+            request.onsuccess = () => resolve(request.result || null)
+            request.onerror = () => reject(request.error)
+          })
+        })
+      } catch (error: any) {
+        retries++
+        console.warn(`Get storage attempt ${retries} failed:`, error.message)
         
-        request.onsuccess = () => {
-          const db = request.result
-          
-          if (!db.objectStoreNames.contains('auth')) {
-            db.close()
-            resolve(null)
-            return
-          }
-          
-          const transaction = db.transaction(['auth'], 'readonly')
-          const store = transaction.objectStore('auth')
-          const getRequest = store.get(key)
-          
-          getRequest.onsuccess = () => {
-            db.close()
-            resolve(getRequest.result || null)
-          }
-          
-          getRequest.onerror = () => {
-            db.close()
-            reject(getRequest.error)
-          }
+        if (error.name === 'NotFoundError' && retries < maxRetries) {
+          // Wait a bit and retry
+          await new Promise(resolve => setTimeout(resolve, 100 * retries))
+          continue
         }
-      })
-    } catch (error) {
-      console.error('Failed to get from storage:', error)
-      return null
+        
+        // Return null on final failure
+        if (retries >= maxRetries) {
+          console.error('Failed to get from storage after all retries:', error)
+          return null
+        }
+      }
     }
+    
+    return null
   }
 
   private async removeFromStorage(key: string): Promise<void> {
-    try {
-      const request = indexedDB.open('ViSecureDB', 1)
-      
-      return new Promise((resolve, reject) => {
-        request.onerror = () => reject(request.error)
+    return withTransaction('auth', 'readwrite', async (_, store) => {
+      return new Promise<void>((resolve, reject) => {
+        const objectStore = store as IDBObjectStore
+        const request = objectStore.delete(key)
         
-        request.onsuccess = () => {
-          const db = request.result
-          
-          if (!db.objectStoreNames.contains('auth')) {
-            db.close()
-            resolve()
-            return
-          }
-          
-          const transaction = db.transaction(['auth'], 'readwrite')
-          const store = transaction.objectStore('auth')
-          
-          store.delete(key)
-          
-          transaction.oncomplete = () => {
-            db.close()
-            resolve()
-          }
-          
-          transaction.onerror = () => reject(transaction.error)
-        }
+        request.onsuccess = () => resolve()
+        request.onerror = () => reject(request.error)
       })
-    } catch (error) {
-      console.error('Failed to remove from storage:', error)
-      throw error
-    }
+    })
   }
 
   // Check if auth is set up

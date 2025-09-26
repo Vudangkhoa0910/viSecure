@@ -3,6 +3,8 @@
  * Handles WebAuthn biometric authentication
  */
 
+import { withTransaction } from '../utils/databaseInitializer'
+
 interface BiometricCredential {
   credentialId: number[]
   enabled: boolean
@@ -17,13 +19,55 @@ export class BiometricAuthManager {
   // Check if biometric authentication is available
   async isAvailable(): Promise<boolean> {
     try {
+      // Check basic WebAuthn support
       if (!('credentials' in navigator) || !('create' in navigator.credentials)) {
+        console.log('WebAuthn not supported in this browser')
         return false
       }
 
-      // Check if platform authenticator is available
-      const available = await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable()
-      return available
+      // Check if PublicKeyCredential is available
+      if (!window.PublicKeyCredential) {
+        console.log('PublicKeyCredential not available')
+        return false
+      }
+
+      // Check platform authenticator availability
+      let platformAvailable = false
+      try {
+        platformAvailable = await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable()
+      } catch (error) {
+        console.log('Platform authenticator check failed:', error)
+        platformAvailable = false
+      }
+
+      // Additional checks for different platforms
+      const userAgent = navigator.userAgent.toLowerCase()
+      const isMac = /macintosh|mac os x/.test(userAgent)
+      const isWindows = /windows/.test(userAgent)
+      const isLinux = /linux/.test(userAgent)
+
+      // On macOS, Touch ID should be available
+      if (isMac && !platformAvailable) {
+        console.log('macOS detected but Touch ID may not be available')
+        // Try a more generous check for macOS
+        platformAvailable = true // Allow macOS users to try
+      }
+
+      // On Windows, Windows Hello should be available
+      if (isWindows && !platformAvailable) {
+        console.log('Windows detected, checking for Windows Hello')
+        // Windows Hello might be available even if initial check fails
+        platformAvailable = true // Allow Windows users to try
+      }
+
+      console.log('Biometric availability check:', {
+        webAuthnSupported: true,
+        platformAvailable,
+        userAgent: userAgent.substring(0, 50) + '...',
+        platform: isMac ? 'macOS' : isWindows ? 'Windows' : isLinux ? 'Linux' : 'Other'
+      })
+
+      return platformAvailable
     } catch (error) {
       console.error('Error checking biometric availability:', error)
       return false
@@ -33,14 +77,17 @@ export class BiometricAuthManager {
   // Setup biometric authentication
   async setupBiometric(): Promise<boolean> {
     try {
-      if (!await this.isAvailable()) {
-        throw new Error('Biometric authentication not available')
+      const available = await this.isAvailable()
+      if (!available) {
+        console.error('Biometric authentication not available on this device')
+        throw new Error('Biometric authentication not available on this device')
       }
 
+      console.log('Starting biometric setup...')
       const challenge = crypto.getRandomValues(new Uint8Array(32))
       const userId = crypto.getRandomValues(new Uint8Array(64))
 
-      const credential = await navigator.credentials.create({
+      const createOptions = {
         publicKey: {
           challenge,
           rp: {
@@ -53,22 +100,28 @@ export class BiometricAuthManager {
             displayName: 'ViSecure User'
           },
           pubKeyCredParams: [
-            { alg: -7, type: 'public-key' }, // ES256
-            { alg: -257, type: 'public-key' } // RS256
+            { alg: -7, type: 'public-key' as const }, // ES256
+            { alg: -257, type: 'public-key' as const } // RS256
           ],
           authenticatorSelection: {
-            authenticatorAttachment: 'platform',
-            userVerification: 'required',
-            residentKey: 'preferred'
+            authenticatorAttachment: 'platform' as const,
+            userVerification: 'required' as const,
+            residentKey: 'preferred' as const
           },
           timeout: 60000,
-          attestation: 'none'
+          attestation: 'none' as const
         }
-      }) as PublicKeyCredential
+      }
+
+      console.log('Creating WebAuthn credential with options:', createOptions)
+
+      const credential = await navigator.credentials.create(createOptions) as PublicKeyCredential
 
       if (!credential) {
-        throw new Error('Failed to create credential')
+        throw new Error('Failed to create credential - no credential returned')
       }
+
+      console.log('Biometric credential created successfully')
 
       // Save credential information
       const biometricConfig: BiometricCredential = {
@@ -78,10 +131,23 @@ export class BiometricAuthManager {
       }
 
       await this.saveToStorage('visecure_biometric', biometricConfig)
+      console.log('Biometric configuration saved')
       return true
-    } catch (error) {
+    } catch (error: any) {
       console.error('Failed to setup biometric authentication:', error)
-      return false
+      
+      // Provide more specific error messages
+      if (error.name === 'NotSupportedError') {
+        throw new Error('Biometric authentication is not supported on this device')
+      } else if (error.name === 'NotAllowedError') {
+        throw new Error('Biometric authentication was cancelled or not allowed')
+      } else if (error.name === 'SecurityError') {
+        throw new Error('Security error: Please ensure you are using HTTPS')
+      } else if (error.name === 'AbortError') {
+        throw new Error('Biometric setup was aborted')
+      } else {
+        throw new Error(`Biometric setup failed: ${error.message}`)
+      }
     }
   }
 
@@ -156,112 +222,44 @@ export class BiometricAuthManager {
     }
   }
 
-  // Storage Helpers (similar to LocalAuthManager)
+  // Storage Helpers
   private async saveToStorage<T>(key: string, data: T): Promise<void> {
-    try {
-      const request = indexedDB.open('ViSecureDB', 1)
-      
-      return new Promise((resolve, reject) => {
+    return withTransaction('auth', 'readwrite', async (_, store) => {
+      return new Promise<void>((resolve, reject) => {
+        const objectStore = store as IDBObjectStore
+        const request = objectStore.put(data, key)
+        
+        request.onsuccess = () => resolve()
         request.onerror = () => reject(request.error)
-        
-        request.onupgradeneeded = () => {
-          const db = request.result
-          if (!db.objectStoreNames.contains('auth')) {
-            db.createObjectStore('auth')
-          }
-        }
-        
-        request.onsuccess = () => {
-          const db = request.result
-          const transaction = db.transaction(['auth'], 'readwrite')
-          const store = transaction.objectStore('auth')
-          
-          store.put(data, key)
-          
-          transaction.oncomplete = () => {
-            db.close()
-            resolve()
-          }
-          
-          transaction.onerror = () => reject(transaction.error)
-        }
       })
-    } catch (error) {
-      console.error('Failed to save to storage:', error)
-      throw error
-    }
+    })
   }
 
   private async getFromStorage<T>(key: string): Promise<T | null> {
-    try {
-      const request = indexedDB.open('ViSecureDB', 1)
-      
-      return new Promise((resolve, reject) => {
-        request.onerror = () => reject(request.error)
+    return withTransaction('auth', 'readonly', async (_, store) => {
+      return new Promise<T | null>((resolve, reject) => {
+        const objectStore = store as IDBObjectStore
+        const request = objectStore.get(key)
         
-        request.onsuccess = () => {
-          const db = request.result
-          
-          if (!db.objectStoreNames.contains('auth')) {
-            db.close()
-            resolve(null)
-            return
-          }
-          
-          const transaction = db.transaction(['auth'], 'readonly')
-          const store = transaction.objectStore('auth')
-          const getRequest = store.get(key)
-          
-          getRequest.onsuccess = () => {
-            db.close()
-            resolve(getRequest.result || null)
-          }
-          
-          getRequest.onerror = () => {
-            db.close()
-            reject(getRequest.error)
-          }
-        }
+        request.onsuccess = () => resolve(request.result || null)
+        request.onerror = () => reject(request.error)
       })
-    } catch (error) {
+    }).catch((error) => {
       console.error('Failed to get from storage:', error)
       return null
-    }
+    })
   }
 
   private async removeFromStorage(key: string): Promise<void> {
-    try {
-      const request = indexedDB.open('ViSecureDB', 1)
-      
-      return new Promise((resolve, reject) => {
-        request.onerror = () => reject(request.error)
+    return withTransaction('auth', 'readwrite', async (_, store) => {
+      return new Promise<void>((resolve, reject) => {
+        const objectStore = store as IDBObjectStore
+        const request = objectStore.delete(key)
         
-        request.onsuccess = () => {
-          const db = request.result
-          
-          if (!db.objectStoreNames.contains('auth')) {
-            db.close()
-            resolve()
-            return
-          }
-          
-          const transaction = db.transaction(['auth'], 'readwrite')
-          const store = transaction.objectStore('auth')
-          
-          store.delete(key)
-          
-          transaction.oncomplete = () => {
-            db.close()
-            resolve()
-          }
-          
-          transaction.onerror = () => reject(transaction.error)
-        }
+        request.onsuccess = () => resolve()
+        request.onerror = () => reject(request.error)
       })
-    } catch (error) {
-      console.error('Failed to remove from storage:', error)
-      throw error
-    }
+    })
   }
 }
 

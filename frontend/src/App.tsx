@@ -5,7 +5,7 @@ import {
   Security as VaultIcon,
   QrCodeScanner as ScannerIcon,
   Home as HomeIcon,
-  VpnLock as VpnIcon,
+  Psychology as AiIcon,
   Person as ProfileIcon,
 } from '@mui/icons-material'
 
@@ -13,18 +13,18 @@ import {
 const HomePage = lazy(() => import('./pages/HomePage'))
 const VaultPage = lazy(() => import('./pages/VaultPage'))
 const ScannerPage = lazy(() => import('./pages/ScannerPage'))
-const VpnPage = lazy(() => import('./pages/VpnPage'))
+const AIAssistantPage = lazy(() => import('./pages/AIAssistantPage'))
 const ProfilePage = lazy(() => import('./pages/ProfilePage'))
 import Layout from './components/Layout'
 import Preloader from './components/Preloader'
-import AuthGuard from './components/AuthGuard'
+import SimpleAuthGuard from './components/SimpleAuthGuard'
 import { performanceMonitor } from './utils/performance'
 
 const navigationItems = [
   { label: 'Home', value: '/', icon: HomeIcon },
   { label: 'Vault', value: '/vault', icon: VaultIcon },
   { label: 'Scanner', value: '/scanner', icon: ScannerIcon },
-  { label: 'VPN', value: '/vpn', icon: VpnIcon },
+  { label: 'AI Assistant', value: '/ai', icon: AiIcon },
   { label: 'Profile', value: '/profile', icon: ProfileIcon },
 ]
 
@@ -58,7 +58,7 @@ function App() {
   }
 
   return (
-    <AuthGuard>
+    <SimpleAuthGuard>
       <Layout>
         <Box sx={{ 
           flex: 1, 
@@ -70,7 +70,7 @@ function App() {
               <Route path="/" element={<HomePage />} />
               <Route path="/vault" element={<VaultPage />} />
               <Route path="/scanner" element={<ScannerPage />} />
-              <Route path="/vpn" element={<VpnPage />} />
+              <Route path="/ai" element={<AIAssistantPage />} />
               <Route path="/profile" element={<ProfilePage />} />
             </Routes>
           </Suspense>
@@ -138,7 +138,7 @@ function App() {
       </BottomNavigation>
     </Box>
     </Layout>
-    </AuthGuard>
+    </SimpleAuthGuard>
   )
 }
 
